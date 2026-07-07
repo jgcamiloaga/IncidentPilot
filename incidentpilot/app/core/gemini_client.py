@@ -35,7 +35,8 @@ class GeminiClient:
 
     def generate_json(self, prompt: str, schema_class: Type[BaseModel]) -> dict:
         """
-        Submits a prompt to Gemini (gemini-2.5-flash) requesting a schema-conforming JSON response.
+        Submits a prompt to Gemini requesting a schema-conforming JSON response.
+        Utilizes a model fallback chain to recover from 429 Rate Limit/Quota errors.
 
         Args:
             prompt (str): The prompt detailing instructions for the LLM.
@@ -46,59 +47,88 @@ class GeminiClient:
         
         Raises:
             ValueError: If the API key is not configured.
-            Exception: If request/deserialization fails for both SDK and REST interfaces.
+            Exception: If request/deserialization fails for all models in the chain.
         """
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY must be configured to execute LLM calls.")
 
-        # Inject Pydantic JSON schema constraints directly into the prompt context
-        schema_fields = json.dumps(schema_class.model_json_schema(), indent=2)
+        # Failover model chain to bypass model-specific rate limits
+        model_chain = [
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemma-4-26b-a4b-it"
+        ]
+
+        schema_json = schema_class.model_json_schema()
+        schema_str = json.dumps(schema_json)
+        schema_fields = json.dumps(schema_json, indent=2)
         system_instruction = (
             f"You are a helpful assistant. You must output valid JSON conforming strictly to "
             f"this JSON schema:\n{schema_fields}\nDo not include any markdown block markers like ```json."
         )
 
         full_prompt = f"{system_instruction}\n\nUser request:\n{prompt}"
-
-        # Attempt to request via official Google GenAI SDK if successfully loaded
-        if self.use_sdk:
-            try:
-                from google.genai import types
-                
-                # Omit response_schema if the Pydantic schema contains unsupported features (like arbitrary dicts generating additionalProperties)
-                schema_json = schema_class.model_json_schema()
-                schema_str = json.dumps(schema_json)
-                use_response_schema = schema_class if "additionalProperties" not in schema_str else None
-                
-                response = self.client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=full_prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=use_response_schema,
-                        temperature=0.1,
+        
+        last_exception = None
+        for model_name in model_chain:
+            logger.info(f"Attempting JSON generation with model: {model_name}")
+            
+            # Attempt to request via official Google GenAI SDK if successfully loaded
+            if self.use_sdk:
+                try:
+                    from google.genai import types
+                    
+                    # Omit response_schema if the Pydantic schema contains unsupported features (like arbitrary dicts generating additionalProperties)
+                    use_response_schema = schema_class if "additionalProperties" not in schema_str else None
+                    
+                    response = self.client.models.generate_content(
+                        model=model_name,
+                        contents=full_prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=use_response_schema,
+                            temperature=0.1,
+                        )
                     )
-                )
-                if response.text:
-                    clean_text = self._clean_json_response(response.text)
-                    return json.loads(clean_text)
+                    if response.text:
+                        clean_text = self._clean_json_response(response.text)
+                        return json.loads(clean_text)
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    # If it's a rate limit or quota error, skip directly to the next model in the chain
+                    if "429" in err_msg or "resource_exhausted" in err_msg or "quota" in err_msg:
+                        logger.warning(f"Model {model_name} rate limit exceeded: {e}. Trying next model in chain...")
+                        last_exception = e
+                        continue
+                    else:
+                        logger.warning(f"GenAI SDK call failed for {model_name}: {e}. Falling back to REST API for this model...")
+            
+            # Fallback to direct HTTP REST request for the current model
+            try:
+                return self._generate_json_rest(full_prompt, model_name)
             except Exception as e:
-                logger.warning(f"GenAI SDK call failed: {e}. Falling back to REST API.")
+                err_msg = str(e).lower()
+                logger.warning(f"REST API call failed for model {model_name}: {e}")
+                last_exception = e
+                # Continue loop to try next model in the chain
+                continue
+                
+        raise Exception(f"All models in the fallback chain exhausted. Last error: {last_exception}")
 
-        # Fallback to direct HTTP REST request in case of SDK errors or omission
-        return self._generate_json_rest(full_prompt)
-
-    def _generate_json_rest(self, prompt: str) -> dict:
+    def _generate_json_rest(self, prompt: str, model_name: str) -> dict:
         """
         Executes a direct POST request to the Gemini API endpoint.
         
         Args:
             prompt (str): Prepared payload containing instructions and schema injection.
+            model_name (str): The target model string.
 
         Returns:
             dict: Parsed JSON response candidates.
         """
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
         headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": self.api_key
