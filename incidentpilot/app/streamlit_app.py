@@ -16,7 +16,7 @@ from incidentpilot.app.coordinator import IncidentCoordinator
 from incidentpilot.app.core.tools import run_tool_simulation
 
 # Bootstrapping configurations and environmental secrets
-load_dotenv()
+load_dotenv(override=True)
 
 # Establish basic Streamlit page layout properties and document title metadata
 st.set_page_config(
