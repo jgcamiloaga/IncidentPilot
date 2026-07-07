@@ -321,49 +321,54 @@ with col1:
 with col2:
     st.markdown("### 📊 Cognitive Analysis Cockpit")
     
+    # Persistent container for the deliberation timeline to prevent Streamlit widget hierarchy
+    # shifting, which resets active tabs during reruns (e.g. when clicking Run Action).
+    timeline_container = st.empty()
+    
     if analyze_button:
         if not api_key:
             st.error("Missing Gemini API Key. Please configure it in the sidebar setup panel.")
         elif not incident_input.strip():
             st.warning("No incident data found to analyze. Please paste logs or load a scenario.")
         else:
-            # Container displaying chronological progress state outputs from agents
-            st.markdown("#### ⏳ Agent Deliberation Timeline")
-            
-            try:
-                coordinator = IncidentCoordinator(api_key=api_key)
+            with timeline_container.container():
+                # Container displaying chronological progress state outputs from agents
+                st.markdown("#### ⏳ Agent Deliberation Timeline")
                 
-                # Stream generator states into status container widgets in real time
-                with st.status("⚡ Initializing incident response coordinator...", expanded=True) as status_container:
-                    for event in coordinator.process_incident(incident_input):
-                        status_state = event["status"]
-                        status_msg = event["message"]
-                        
-                        if status_state == "started":
-                            status_container.update(label=status_msg, state="running")
-                        elif status_state == "parallel_start":
-                            status_container.update(label="⚙️ Launching parallel agents...", state="running")
-                        elif status_state == "processing":
-                            status_container.update(label="🤖 Processing Triage and RCA concurrently...", state="running")
-                        elif status_state == "triage_done":
-                            st.markdown(f"🛡️ **Triage Agent** classified severity as **{event['data'].severity}**.")
-                            st.caption(status_msg)
-                        elif status_state == "rca_done":
-                            st.markdown("🔍 **RCA Agent** successfully mapped logs and runbook mitigation.")
-                            st.caption(status_msg)
-                        elif status_state == "triage_error":
-                            st.error(f"❌ Triage Agent failed: {status_msg}")
-                        elif status_state == "rca_error":
-                            st.error(f"❌ RCA Agent failed: {status_msg}")
-                        elif status_state == "aggregating":
-                            status_container.update(label="🔄 Consolidating reports...", state="running")
-                        elif status_state == "complete":
-                            status_container.update(label="🎉 Incident response diagnosis completed successfully!", state="complete", expanded=False)
-                            st.session_state["report"] = event["report"]
-                            st.session_state["console_logs"] = {}
-                        
-            except Exception as e:
-                st.error(f"Error during agent analysis: {e}")
+                try:
+                    coordinator = IncidentCoordinator(api_key=api_key)
+                    
+                    # Stream generator states into status container widgets in real time
+                    with st.status("⚡ Initializing incident response coordinator...", expanded=True) as status_container:
+                        for event in coordinator.process_incident(incident_input):
+                            status_state = event["status"]
+                            status_msg = event["message"]
+                            
+                            if status_state == "started":
+                                status_container.update(label=status_msg, state="running")
+                            elif status_state == "parallel_start":
+                                status_container.update(label="⚙️ Launching parallel agents...", state="running")
+                            elif status_state == "processing":
+                                status_container.update(label="🤖 Processing Triage and RCA concurrently...", state="running")
+                            elif status_state == "triage_done":
+                                st.markdown(f"🛡️ **Triage Agent** classified severity as **{event['data'].severity}**.")
+                                st.caption(status_msg)
+                            elif status_state == "rca_done":
+                                st.markdown("🔍 **RCA Agent** successfully mapped logs and runbook mitigation.")
+                                st.caption(status_msg)
+                            elif status_state == "triage_error":
+                                st.error(f"❌ Triage Agent failed: {status_msg}")
+                            elif status_state == "rca_error":
+                                st.error(f"❌ RCAAgent failed: {status_msg}")
+                            elif status_state == "aggregating":
+                                status_container.update(label="🔄 Consolidating reports...", state="running")
+                            elif status_state == "complete":
+                                status_container.update(label="🎉 Incident response diagnosis completed successfully!", state="complete", expanded=False)
+                                st.session_state["report"] = event["report"]
+                                st.session_state["console_logs"] = {}
+                            
+                except Exception as e:
+                    st.error(f"Error during agent analysis: {e}")
                     
     # Render final generated report once stored in state context
     if "report" in st.session_state:
