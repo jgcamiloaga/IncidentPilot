@@ -67,14 +67,15 @@ def run_tool_simulation(tool_name: str, parameters: dict) -> Generator[str, None
     Yields:
         str: Live stream output logs from the dispatched simulation.
     """
+    params = parameters or {}
     if tool_name == "simulate_restart_pod":
-        pod_name = parameters.get("pod_name", "unknown-pod")
-        namespace = parameters.get("namespace", "default")
+        pod_name = params.get("pod_name", "unknown-pod")
+        namespace = params.get("namespace", "default")
         yield from simulate_restart_pod(pod_name, namespace)
         
     elif tool_name == "simulate_kill_postgres_connections":
-        database_name = parameters.get("database_name", "postgres")
-        min_idle_seconds = parameters.get("min_idle_seconds", 10)
+        database_name = params.get("database_name", "postgres")
+        min_idle_seconds = params.get("min_idle_seconds", 10)
         yield from simulate_kill_postgres_connections(database_name, min_idle_seconds)
         
     else:
