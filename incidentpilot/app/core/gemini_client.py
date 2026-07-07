@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # Bootstrap environment configurations
-load_dotenv()
+load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,10 @@ class GeminiClient:
             raise ValueError("GEMINI_API_KEY must be configured to execute LLM calls.")
 
         # Inject Pydantic JSON schema constraints directly into the prompt context
-        schema_fields = schema_class.__doc__ or str(schema_class.model_json_schema())
+        schema_fields = json.dumps(schema_class.model_json_schema(), indent=2)
         system_instruction = (
             f"You are a helpful assistant. You must output valid JSON conforming strictly to "
-            f"this schema:\n{schema_fields}\nDo not include any markdown block markers like ```json."
+            f"this JSON schema:\n{schema_fields}\nDo not include any markdown block markers like ```json."
         )
 
         full_prompt = f"{system_instruction}\n\nUser request:\n{prompt}"
@@ -64,11 +64,18 @@ class GeminiClient:
         if self.use_sdk:
             try:
                 from google.genai import types
+                
+                # Omit response_schema if the Pydantic schema contains unsupported features (like arbitrary dicts generating additionalProperties)
+                schema_json = schema_class.model_json_schema()
+                schema_str = json.dumps(schema_json)
+                use_response_schema = schema_class if "additionalProperties" not in schema_str else None
+                
                 response = self.client.models.generate_content(
                     model='gemini-2.5-flash',
                     contents=full_prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
+                        response_schema=use_response_schema,
                         temperature=0.1,
                     )
                 )
