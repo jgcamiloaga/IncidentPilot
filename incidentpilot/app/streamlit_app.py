@@ -360,6 +360,7 @@ with col2:
                         elif status_state == "complete":
                             status_container.update(label="🎉 Incident response diagnosis completed successfully!", state="complete", expanded=False)
                             st.session_state["report"] = event["report"]
+                            st.session_state["console_logs"] = {}
                         
             except Exception as e:
                 st.error(f"Error during agent analysis: {e}")
@@ -465,7 +466,7 @@ with col2:
                             run_action_clicked = True
                             
                 # Expandable terminal shell mimicking real-time execution feedback
-                if run_action_clicked or idx in st.session_state["console_logs"]:
+                if (run_action_clicked or idx in st.session_state["console_logs"]) and step.action:
                     st.markdown(
                         f"""
                         <div style='background-color: #0f172a; border-radius: 0.5rem 0.5rem 0 0; padding: 0.5rem 1rem; border: 1px solid rgba(255,255,255,0.08); border-bottom: none; font-family: monospace; font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem;'>
